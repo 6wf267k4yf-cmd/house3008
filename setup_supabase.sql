@@ -11,7 +11,12 @@ CREATE TABLE transactions (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Biarkan anon key bisa read/write (Row Level Security)
+-- Izinkan akses untuk role anon (public)
+GRANT ALL ON public.transactions TO anon;
+GRANT ALL ON public.transactions TO authenticated;
+GRANT USAGE ON SEQUENCE transactions_id_seq TO anon;
+
+-- Row Level Security
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Public access" ON transactions
