@@ -4,9 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Kontrol Keuangan</title>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"
-          onerror="document.getElementById('statusBar').innerHTML='Gagal memuat Supabase SDK. Periksa koneksi internet.'">
-  </script></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #fefefe; padding: 24px; }
@@ -170,9 +167,10 @@
 
   <div id="toast" class="toast">Tersimpan</div>
 
-  <script>
+  <script type="module">
+    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
     // ========== SUPABASE CONFIG ==========
-    // Ganti dengan URL dan Anon Key dari project Supabase kamu:
     const SUPABASE_URL = 'https://vksejgvrydxdxucszbwq.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZrc2VqZ3ZyeWR4ZHh1Y3N6YndxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5OTg4ODUsImV4cCI6MjA5NjU3NDg4NX0.7HEeFG9iQV8RMnvbfriAtX76Uz0pCwU_zE5o7m63SV8';
     // =====================================
@@ -181,19 +179,11 @@
 
     let supabase;
     let saveTimer;
-    let loadTimer;
 
     function showToast(msg) {
       const t = document.getElementById('toast');
       t.textContent = msg; t.classList.add('show');
       clearTimeout(t._hide); t._hide = setTimeout(() => t.classList.remove('show'), 2000);
-    }
-
-    function onChange() { hitung(); autoSimpan(); }
-
-    function autoSimpan() {
-      clearTimeout(saveTimer);
-      saveTimer = setTimeout(simpan, 500);
     }
 
     function today() {
@@ -214,7 +204,7 @@
       const inpTanggal = document.createElement('input');
       inpTanggal.type = 'date';
       inpTanggal.value = data.tanggal || today();
-      inpTanggal.oninput = onChange;
+      inpTanggal.oninput = () => { hitung(); autoSimpan(); };
       tdTgl.appendChild(inpTanggal);
       tr.appendChild(tdTgl);
 
@@ -230,7 +220,7 @@
         const select = document.createElement('select');
         select.innerHTML = '<option value="">-- Pilih --</option>' +
           categories.map(c => `<option value="${c}"${data.kategori === c ? ' selected' : ''}>${c}</option>`).join('');
-        select.oninput = onChange;
+        select.oninput = () => { hitung(); autoSimpan(); };
         tdKat.appendChild(select);
       } else {
         tdKat.textContent = '-';
@@ -242,7 +232,7 @@
       inpKet.type = 'text';
       inpKet.placeholder = tipe === 'pemasukan' ? 'mis: dari pak iwan' : 'mis: Belanja pasar...';
       inpKet.value = data.keterangan || '';
-      inpKet.oninput = onChange;
+      inpKet.oninput = () => { hitung(); autoSimpan(); };
       tdKet.appendChild(inpKet);
       tr.appendChild(tdKet);
 
@@ -252,7 +242,7 @@
       inpNom.min = '0';
       inpNom.value = data.nominal || '';
       inpNom.placeholder = '0';
-      inpNom.oninput = onChange;
+      inpNom.oninput = () => { hitung(); autoSimpan(); };
       inpNom.style.fontWeight = '600';
       tdNom.appendChild(inpNom);
       tr.appendChild(tdNom);
@@ -306,13 +296,15 @@
       const btnHapus = document.createElement('button');
       btnHapus.className = 'btn btn-del';
       btnHapus.textContent = 'X';
-      btnHapus.onclick = function() { tr.remove(); onChange(); };
+      btnHapus.onclick = function() { tr.remove(); hitung(); autoSimpan(); };
       tdHapus.appendChild(btnHapus);
       tr.appendChild(tdHapus);
 
       tbody.appendChild(tr);
       hitung();
     }
+
+    window.addRow = addRow;
 
     function getMonthLabel(ym) {
       const months = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
@@ -410,7 +402,12 @@
       });
     }
 
-    // --- Supabase CRUD ---
+    window.hitung = hitung;
+
+    function autoSimpan() {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(simpan, 500);
+    }
 
     function getRowsFromDOM() {
       const rows = [];
@@ -436,39 +433,31 @@
           const { error: insErr } = await supabase.from('transactions').insert(rows);
           if (insErr) throw insErr;
         }
-        showToast('Tersimpan');
       } catch (e) {
         console.error('Save error:', e);
-        showToast('Gagal simpan: ' + e.message);
       }
     }
 
     async function loadData() {
+      const sb = document.getElementById('statusBar');
       if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
         document.getElementById('setupBox').style.display = 'block';
-        document.getElementById('statusBar').textContent = 'Konfigurasi Supabase diperlukan. Lihat panduan di atas.';
+        sb.textContent = 'Isi SUPABASE_URL dan SUPABASE_ANON_KEY di dalam file.';
         addRow('pemasukan');
         return;
       }
 
       try {
-        if (!window.supabase) {
-          document.getElementById('statusBar').innerHTML = 'Supabase SDK belum dimuat. Coba refresh halaman.';
-          addRow('pemasukan');
-          return;
-        }
-        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
           auth: { persistSession: false }
         });
 
-        // Test koneksi
         const { data, error } = await supabase.from('transactions').select('*').order('id');
         if (error) {
           if (error.code === '42P01') {
-            document.getElementById('statusBar').innerHTML =
-              'Table <b>transactions</b> belum dibuat. Jalankan SQL di <b>setup_supabase.sql</b> lewat Supabase SQL Editor.';
+            sb.innerHTML = 'Table <b>transactions</b> belum ada. Jalankan SQL di <b>setup_supabase.sql</b>.';
           } else {
-            document.getElementById('statusBar').innerHTML = 'Error: ' + error.message + ' (kode: ' + (error.code || '-') + ')';
+            sb.textContent = 'Error: ' + error.message;
           }
           addRow('pemasukan');
           return;
@@ -483,34 +472,34 @@
             nominal: r.nominal || '',
             imgData: r.img_data || ''
           }));
-          document.getElementById('statusBar').textContent = data.length + ' transaksi dimuat dari cloud.';
+          sb.textContent = data.length + ' transaksi dimuat.';
         } else {
           addRow('pemasukan');
-          document.getElementById('statusBar').textContent = 'Belum ada data. Tambahkan transaksi.';
+          sb.textContent = 'Belum ada data. Tambahkan transaksi.';
         }
         hitung();
       } catch (e) {
         console.error('Load error:', e);
-        document.getElementById('statusBar').textContent = 'Gagal memuat data: ' + e.message;
+        sb.textContent = 'Gagal: ' + e.message;
         addRow('pemasukan');
       }
     }
 
     async function resetData() {
       if (!supabase) return;
-      if (!confirm('Hapus semua data dari cloud? Data tidak bisa dikembalikan.')) return;
+      if (!confirm('Hapus semua data dari cloud?')) return;
       try {
-        const { error } = await supabase.from('transactions').delete().neq('id', 0);
-        if (error) throw error;
+        await supabase.from('transactions').delete().neq('id', 0);
         document.getElementById('ledgerBody').innerHTML = '';
         addRow('pemasukan');
         hitung();
-        showToast('Semua data dihapus');
+        showToast('Data dihapus');
       } catch (e) {
-        console.error('Reset error:', e);
-        showToast('Gagal reset: ' + e.message);
+        showToast('Gagal: ' + e.message);
       }
     }
+
+    window.resetData = resetData;
 
     loadData();
   </script>
