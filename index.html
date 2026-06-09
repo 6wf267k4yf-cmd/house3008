@@ -4,7 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Kontrol Keuangan</title>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"
+          onerror="document.getElementById('statusBar').innerHTML='Gagal memuat Supabase SDK. Periksa koneksi internet.'">
+  </script></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #fefefe; padding: 24px; }
@@ -417,9 +419,9 @@
         const tanggal = tr.querySelector('td:nth-child(1) input').value;
         const kategori = tipe === 'pengeluaran' ? tr.querySelector('td:nth-child(3) select').value : '';
         const keterangan = tr.querySelector('td:nth-child(4) input').value;
-        const nominal = tr.querySelector('td:nth-child(5) input').value;
+        const nominal = parseFloat(tr.querySelector('td:nth-child(5) input').value) || 0;
         const imgData = (tr.querySelector('input[name="imgData"]') || {}).value || '';
-        rows.push({ tipe, tanggal, kategori, keterangan, nominal, imgData });
+        rows.push({ tipe, tanggal, kategori, keterangan, nominal, img_data: imgData });
       });
       return rows;
     }
@@ -434,8 +436,10 @@
           const { error: insErr } = await supabase.from('transactions').insert(rows);
           if (insErr) throw insErr;
         }
+        showToast('Tersimpan');
       } catch (e) {
         console.error('Save error:', e);
+        showToast('Gagal simpan: ' + e.message);
       }
     }
 
@@ -448,9 +452,27 @@
       }
 
       try {
-        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        if (!window.supabase) {
+          document.getElementById('statusBar').innerHTML = 'Supabase SDK belum dimuat. Coba refresh halaman.';
+          addRow('pemasukan');
+          return;
+        }
+        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+          auth: { persistSession: false }
+        });
+
+        // Test koneksi
         const { data, error } = await supabase.from('transactions').select('*').order('id');
-        if (error) throw error;
+        if (error) {
+          if (error.code === '42P01') {
+            document.getElementById('statusBar').innerHTML =
+              'Table <b>transactions</b> belum dibuat. Jalankan SQL di <b>setup_supabase.sql</b> lewat Supabase SQL Editor.';
+          } else {
+            document.getElementById('statusBar').innerHTML = 'Error: ' + error.message + ' (kode: ' + (error.code || '-') + ')';
+          }
+          addRow('pemasukan');
+          return;
+        }
 
         document.getElementById('ledgerBody').innerHTML = '';
         if (data && data.length > 0) {
@@ -461,10 +483,11 @@
             nominal: r.nominal || '',
             imgData: r.img_data || ''
           }));
+          document.getElementById('statusBar').textContent = data.length + ' transaksi dimuat dari cloud.';
         } else {
           addRow('pemasukan');
+          document.getElementById('statusBar').textContent = 'Belum ada data. Tambahkan transaksi.';
         }
-        document.getElementById('statusBar').textContent = 'Data dimuat dari cloud (' + (data ? data.length : 0) + ' transaksi)';
         hitung();
       } catch (e) {
         console.error('Load error:', e);
