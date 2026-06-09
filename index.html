@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Kontrol Keuangan</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #fefefe; padding: 24px; }
@@ -24,8 +25,6 @@
     td input[type="file"]:hover { border-color: #6c5ce7; background: #f8f9ff; }
     td .img-preview { max-width: 70px; max-height: 50px; display: block; margin-top: 4px; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.1); transition: transform 0.15s; }
     td .img-preview:hover { transform: scale(1.1); }
-    .row-pemasukan { }
-    .row-pengeluaran { }
     .row-pemasukan td:first-child { border-left: 3px solid #00b894; }
     .row-pengeluaran td:first-child { border-left: 3px solid #fd79a8; }
     .badge { display: inline-block; padding: 3px 12px; border-radius: 20px; font-size: 11px; font-weight: 600; letter-spacing: 0.2px; }
@@ -56,6 +55,9 @@
     .btn-save:hover { background: linear-gradient(135deg, #5a4bd1, #8c7ef0); }
     .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -4px; }
     .table-wrap table { min-width: 700px; }
+    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #2d3436; color: white; padding: 10px 24px; border-radius: 10px; font-size: 13px; font-weight: 500; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100; }
+    .toast.show { opacity: 1; }
+    #statusBar { text-align: center; font-size: 12px; color: #636e72; margin-top: 8px; }
 
     @media (max-width: 600px) {
       body { padding: 12px; }
@@ -87,7 +89,23 @@
 </head>
 <body>
   <div class="container">
-    <h1>Financial Tracker</h1>
+    <h1>Kontrol Keuangan</h1>
+
+    <!-- SETUP INSTRUCTION -->
+    <div id="setupBox" class="card" style="border-left:4px solid #fd79a8; display:none;">
+      <h2 style="color:#fd79a8;">Konfigurasi Diperlukan</h2>
+      <p style="font-size:14px;color:#636e72;margin-bottom:12px;">
+        Isi <strong>SUPABASE_URL</strong> dan <strong>SUPABASE_ANON_KEY</strong> dari project Supabase kamu di bagian bawah tag
+        <code>&lt;script&gt;</code>.
+      </p>
+      <ol style="margin-left:20px;font-size:14px;color:#555;line-height:1.8;">
+        <li>Buka <a href="https://supabase.com" target="_blank">supabase.com</a> &rarr; Sign Up &rarr; buat project baru</li>
+        <li>Di dashboard: <strong>Project Settings &rarr; API</strong></li>
+        <li>Salin <code>Project URL</code> dan <code>anon public key</code></li>
+        <li>Buka file <code>index.html</code> dengan text editor, cari baris <code>const SUPABASE_URL</code> dan <code>const SUPABASE_ANON_KEY</code>, paste nilai tersebut</li>
+        <li>Refresh halaman ini</li>
+      </ol>
+    </div>
 
     <div class="card">
       <h2>Daftar Pemasukan / Pengeluaran</h2>
@@ -112,6 +130,7 @@
         <button class="btn btn-masuk" onclick="addRow('pemasukan')">+ Tambah Pemasukan</button>
         <button class="btn btn-keluar" onclick="addRow('pengeluaran')">+ Tambah Pengeluaran</button>
       </div>
+      <div id="statusBar">Memuat data...</div>
     </div>
 
     <div class="card">
@@ -142,22 +161,37 @@
         <div id="categoryBreakdown" style="display: flex; flex-wrap: wrap; gap: 10px;"></div>
       </div>
       <div class="aksi" style="margin-top:20px;">
-        <button class="btn btn-reset" onclick="resetData()">Reset</button>
+        <button class="btn btn-reset" onclick="resetData()">Reset Semua Data</button>
       </div>
     </div>
   </div>
 
-  <script>
-    const categories = ['sayur', 'air', 'listrik', 'keperluan oma', 'keperluan michelle', 'biaya satpam, kebersihan komplek'];
-    let idCounter = 0;
+  <div id="toast" class="toast">Tersimpan</div>
 
+  <script>
+    // ========== SUPABASE CONFIG ==========
+    // Ganti dengan URL dan Anon Key dari project Supabase kamu:
+    const SUPABASE_URL = 'https://vksejgvrydxdxucszbwq.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZrc2VqZ3ZyeWR4ZHh1Y3N6YndxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5OTg4ODUsImV4cCI6MjA5NjU3NDg4NX0.7HEeFG9iQV8RMnvbfriAtX76Uz0pCwU_zE5o7m63SV8';
+    // =====================================
+
+    const categories = ['sayur', 'air', 'listrik', 'keperluan oma', 'keperluan michelle', 'biaya satpam, kebersihan komplek'];
+
+    let supabase;
     let saveTimer;
+    let loadTimer;
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg; t.classList.add('show');
+      clearTimeout(t._hide); t._hide = setTimeout(() => t.classList.remove('show'), 2000);
+    }
 
     function onChange() { hitung(); autoSimpan(); }
 
     function autoSimpan() {
       clearTimeout(saveTimer);
-      saveTimer = setTimeout(simpan, 400);
+      saveTimer = setTimeout(simpan, 500);
     }
 
     function today() {
@@ -165,15 +199,15 @@
       return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
     }
 
+    let rowSeq = 0;
+
     function addRow(tipe, data) {
       data = data || {};
       const tbody = document.getElementById('ledgerBody');
       const tr = document.createElement('tr');
       tr.className = tipe === 'pemasukan' ? 'row-pemasukan' : 'row-pengeluaran';
+      tr.dataset.seq = rowSeq++;
 
-      const rowId = 'row_' + (idCounter++);
-
-      // Tanggal
       const tdTgl = document.createElement('td');
       const inpTanggal = document.createElement('input');
       inpTanggal.type = 'date';
@@ -182,7 +216,6 @@
       tdTgl.appendChild(inpTanggal);
       tr.appendChild(tdTgl);
 
-      // Tipe
       const tdTipe = document.createElement('td');
       const badge = document.createElement('span');
       badge.className = tipe === 'pemasukan' ? 'badge badge-masuk' : 'badge badge-keluar';
@@ -190,7 +223,6 @@
       tdTipe.appendChild(badge);
       tr.appendChild(tdTipe);
 
-      // Kategori
       const tdKat = document.createElement('td');
       if (tipe === 'pengeluaran') {
         const select = document.createElement('select');
@@ -203,16 +235,15 @@
       }
       tr.appendChild(tdKat);
 
-      // Keterangan
       const tdKet = document.createElement('td');
       const inpKet = document.createElement('input');
       inpKet.type = 'text';
       inpKet.placeholder = tipe === 'pemasukan' ? 'mis: dari pak iwan' : 'mis: Belanja pasar...';
       inpKet.value = data.keterangan || '';
+      inpKet.oninput = onChange;
       tdKet.appendChild(inpKet);
       tr.appendChild(tdKet);
 
-      // Nominal
       const tdNom = document.createElement('td');
       const inpNom = document.createElement('input');
       inpNom.type = 'number';
@@ -220,12 +251,10 @@
       inpNom.value = data.nominal || '';
       inpNom.placeholder = '0';
       inpNom.oninput = onChange;
-      inpNom.onchange = onChange;
       inpNom.style.fontWeight = '600';
       tdNom.appendChild(inpNom);
       tr.appendChild(tdNom);
 
-      // Bukti Foto
       const tdFoto = document.createElement('td');
       if (tipe === 'pengeluaran') {
         const inpFile = document.createElement('input');
@@ -237,17 +266,8 @@
             reader.onload = function(ev) {
               let img = tdFoto.querySelector('.img-preview');
               let hid = tdFoto.querySelector('input[type="hidden"]');
-              if (!img) {
-                img = document.createElement('img');
-                img.className = 'img-preview';
-                tdFoto.appendChild(img);
-              }
-              if (!hid) {
-                hid = document.createElement('input');
-                hid.type = 'hidden';
-                hid.name = 'imgData';
-                tdFoto.appendChild(hid);
-              }
+              if (!img) { img = document.createElement('img'); img.className = 'img-preview'; tdFoto.appendChild(img); }
+              if (!hid) { hid = document.createElement('input'); hid.type = 'hidden'; hid.name = 'imgData'; tdFoto.appendChild(hid); }
               img.src = ev.target.result;
               img.onclick = () => window.open(ev.target.result);
               hid.value = ev.target.result;
@@ -264,9 +284,7 @@
           img.onclick = () => window.open(data.imgData);
           tdFoto.appendChild(img);
           const hid = document.createElement('input');
-          hid.type = 'hidden';
-          hid.name = 'imgData';
-          hid.value = data.imgData;
+          hid.type = 'hidden'; hid.name = 'imgData'; hid.value = data.imgData;
           tdFoto.appendChild(hid);
         }
       } else {
@@ -274,16 +292,13 @@
       }
       tr.appendChild(tdFoto);
 
-      // Saldo Berjalan
       const tdSaldo = document.createElement('td');
       tdSaldo.className = 'saldo-col';
       const spanSaldo = document.createElement('span');
-      spanSaldo.id = 'saldo_' + rowId;
       spanSaldo.textContent = 'Rp 0';
       tdSaldo.appendChild(spanSaldo);
       tr.appendChild(tdSaldo);
 
-      // Hapus
       const tdHapus = document.createElement('td');
       tdHapus.className = 'remove-col';
       const btnHapus = document.createElement('button');
@@ -313,29 +328,18 @@
 
     function hitung() {
       const rows = document.querySelectorAll('#ledgerBody tr');
-      let totalMasuk = 0;
-      let totalKeluar = 0;
-      let running = 0;
-
-      // Collect per-month data
+      let totalMasuk = 0, totalKeluar = 0, running = 0;
       const monthData = {};
-      let allMonthKeys = [];
 
       rows.forEach(tr => {
-        const tipeBadge = tr.querySelector('.badge');
-        const tipe = tipeBadge && tipeBadge.classList.contains('badge-masuk') ? 'masuk' : 'keluar';
+        const tipe = tr.querySelector('.badge').classList.contains('badge-masuk') ? 'masuk' : 'keluar';
         const inpNom = tr.querySelector('td:nth-child(5) input');
         const nom = parseFloat(inpNom ? inpNom.value : 0) || 0;
         const inpDate = tr.querySelector('td:nth-child(1) input');
         const ym = inpDate ? inpDate.value.slice(0,7) : '';
 
-        if (tipe === 'masuk') {
-          totalMasuk += nom;
-          running += nom;
-        } else {
-          totalKeluar += nom;
-          running -= nom;
-        }
+        if (tipe === 'masuk') { totalMasuk += nom; running += nom; }
+        else { totalKeluar += nom; running -= nom; }
 
         const spanSaldo = tr.querySelector('.saldo-col span');
         if (spanSaldo) {
@@ -349,9 +353,7 @@
           else {
             monthData[ym].keluar += nom;
             const catSelect = tr.querySelector('td:nth-child(3) select');
-            if (catSelect && catSelect.value) {
-              monthData[ym].cat[catSelect.value] = (monthData[ym].cat[catSelect.value] || 0) + nom;
-            }
+            if (catSelect && catSelect.value) monthData[ym].cat[catSelect.value] = (monthData[ym].cat[catSelect.value] || 0) + nom;
           }
         }
       });
@@ -359,11 +361,9 @@
       document.getElementById('totalPemasukan').textContent = 'Rp ' + totalMasuk.toLocaleString('id-ID');
       document.getElementById('totalPengeluaran').textContent = 'Rp ' + totalKeluar.toLocaleString('id-ID');
       document.getElementById('saldoAkhir').textContent = 'Rp ' + running.toLocaleString('id-ID');
-      const el = document.getElementById('saldoAkhir');
-      el.style.color = running < 0 ? '#721c24' : '#155724';
+      document.getElementById('saldoAkhir').style.color = running < 0 ? '#721c24' : '#155724';
 
-      // Monthly table
-      allMonthKeys = Object.keys(monthData).sort();
+      const allMonthKeys = Object.keys(monthData).sort();
       populateMonthFilter(allMonthKeys);
 
       let monthlyHtml = '<table style="min-width:450px;"><thead><tr><th>Bulan</th><th>Pemasukan</th><th>Pengeluaran</th><th>Saldo</th></tr></thead><tbody>';
@@ -371,23 +371,18 @@
       allMonthKeys.forEach(ym => {
         const d = monthData[ym];
         monthRunning += d.masuk - d.keluar;
-        monthlyHtml += '<tr>' +
-          '<td style="font-weight:600;">'+getMonthLabel(ym)+'</td>' +
+        monthlyHtml += '<tr><td style="font-weight:600;">'+getMonthLabel(ym)+'</td>' +
           '<td style="color:#00b894;font-weight:600;">Rp '+d.masuk.toLocaleString('id-ID')+'</td>' +
           '<td style="color:#fd79a8;font-weight:600;">Rp '+d.keluar.toLocaleString('id-ID')+'</td>' +
-          '<td style="font-weight:600;color:'+(monthRunning<0?'#fd79a8':'#00b894')+';">Rp '+monthRunning.toLocaleString('id-ID')+'</td>' +
-          '</tr>';
+          '<td style="font-weight:600;color:'+(monthRunning<0?'#fd79a8':'#00b894')+';">Rp '+monthRunning.toLocaleString('id-ID')+'</td></tr>';
       });
       monthlyHtml += '</tbody></table>';
       document.getElementById('monthlyTableWrap').innerHTML = monthlyHtml;
 
-      // Category breakdown (filtered by selected month)
       const selectedMonth = document.getElementById('monthFilter').value;
       const catTotals = {};
-
       rows.forEach(tr => {
-        const tipeBadge = tr.querySelector('.badge');
-        const tipe = tipeBadge && tipeBadge.classList.contains('badge-masuk') ? 'masuk' : 'keluar';
+        const tipe = tr.querySelector('.badge').classList.contains('badge-masuk') ? 'masuk' : 'keluar';
         if (tipe === 'keluar') {
           const inpDate = tr.querySelector('td:nth-child(1) input');
           const ym = inpDate ? inpDate.value.slice(0,7) : '';
@@ -413,15 +408,9 @@
       });
     }
 
-    function loadData() {
-      const saved = localStorage.getItem('financialTrackerV2');
-      if (!saved) { addRow('pemasukan'); return; }
-      const data = JSON.parse(saved);
-      data.rows.forEach(r => addRow(r.tipe, r));
-      hitung();
-    }
+    // --- Supabase CRUD ---
 
-    function simpan() {
+    function getRowsFromDOM() {
       const rows = [];
       document.querySelectorAll('#ledgerBody tr').forEach(tr => {
         const tipe = tr.querySelector('.badge').classList.contains('badge-masuk') ? 'pemasukan' : 'pengeluaran';
@@ -432,16 +421,72 @@
         const imgData = (tr.querySelector('input[name="imgData"]') || {}).value || '';
         rows.push({ tipe, tanggal, kategori, keterangan, nominal, imgData });
       });
-      localStorage.setItem('financialTrackerV2', JSON.stringify({ rows }));
-      alert('Data tersimpan!');
+      return rows;
     }
 
-    function resetData() {
-      if (!confirm('Hapus semua data?')) return;
-      localStorage.removeItem('financialTrackerV2');
-      document.getElementById('ledgerBody').innerHTML = '';
-      addRow('pemasukan');
-      hitung();
+    async function simpan() {
+      if (!supabase) return;
+      const rows = getRowsFromDOM();
+      try {
+        const { error: delErr } = await supabase.from('transactions').delete().neq('id', 0);
+        if (delErr) throw delErr;
+        if (rows.length > 0) {
+          const { error: insErr } = await supabase.from('transactions').insert(rows);
+          if (insErr) throw insErr;
+        }
+      } catch (e) {
+        console.error('Save error:', e);
+      }
+    }
+
+    async function loadData() {
+      if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+        document.getElementById('setupBox').style.display = 'block';
+        document.getElementById('statusBar').textContent = 'Konfigurasi Supabase diperlukan. Lihat panduan di atas.';
+        addRow('pemasukan');
+        return;
+      }
+
+      try {
+        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const { data, error } = await supabase.from('transactions').select('*').order('id');
+        if (error) throw error;
+
+        document.getElementById('ledgerBody').innerHTML = '';
+        if (data && data.length > 0) {
+          data.forEach(r => addRow(r.tipe, {
+            tanggal: r.tanggal,
+            kategori: r.kategori || '',
+            keterangan: r.keterangan || '',
+            nominal: r.nominal || '',
+            imgData: r.img_data || ''
+          }));
+        } else {
+          addRow('pemasukan');
+        }
+        document.getElementById('statusBar').textContent = 'Data dimuat dari cloud (' + (data ? data.length : 0) + ' transaksi)';
+        hitung();
+      } catch (e) {
+        console.error('Load error:', e);
+        document.getElementById('statusBar').textContent = 'Gagal memuat data: ' + e.message;
+        addRow('pemasukan');
+      }
+    }
+
+    async function resetData() {
+      if (!supabase) return;
+      if (!confirm('Hapus semua data dari cloud? Data tidak bisa dikembalikan.')) return;
+      try {
+        const { error } = await supabase.from('transactions').delete().neq('id', 0);
+        if (error) throw error;
+        document.getElementById('ledgerBody').innerHTML = '';
+        addRow('pemasukan');
+        hitung();
+        showToast('Semua data dihapus');
+      } catch (e) {
+        console.error('Reset error:', e);
+        showToast('Gagal reset: ' + e.message);
+      }
     }
 
     loadData();
